@@ -1,13 +1,13 @@
 import functools
 import logging
 import os
-from datetime import datetime
+#from datetime import datetime
 
 LOG_PATH = "data/shop.log"
 os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
 
 logger = logging.getLogger("shop")
-if not logger.handlers:  # Защита от дублирования хендлеров
+if not logger.handlers:
     logger.setLevel(logging.INFO)
     handler = logging.FileHandler(LOG_PATH, encoding="utf-8")
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")

@@ -1,143 +1,165 @@
-import sys
-import argparse
+import os
+import json
 from decimal import Decimal
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich import print
+
 from shop.service import ShopService
-from shop.exceptions import ShopError
+
+console = Console()
+DATA_DIR = "data"
+
+
+def print_products(service: ShopService, category: str = None):
+    products = service.list_products(category)
+    if not products:
+        print(f"[yellow]Товаров в категории '{category}' не найдено.[/yellow]")
+        return
+
+    table = Table(title=f"Товары{' (' + category + ')' if category else ''}")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Название", style="magenta")
+    table.add_column("Категория", style="green")
+    table.add_column("Цена", justify="right", style="yellow")
+    table.add_column("Остаток", justify="right", style="red")
+
+    for p in products:
+        price_str = f"{p.price_per_kg} ₽/кг" if hasattr(p, 'price_per_kg') else f"{p.price} ₽"
+
+        # Для остатка проверяем stock и min_kg через атрибуты
+        if hasattr(p, 'min_kg'):
+            stock_str = f"{p.stock} кг"
+        elif p.stock is not None:
+            stock_str = str(p.stock)
+        else:
+            stock_str = "∞"
+
+        table.add_row(p.product_id, p.name, p.category, price_str, stock_str)
+
+    console.print(table)
+
+
+def print_cart(service: ShopService):
+    if not service.cart:
+        print(Panel("Корзина пуста", style="dim"))
+        return
+
+    table = Table(title="Ваша корзина")
+    table.add_column("ID", style="cyan")
+    table.add_column("Название", style="magenta")
+    table.add_column("Кол-во", justify="right")
+    table.add_column("Цена", justify="right")
+    table.add_column("Сумма", justify="right", style="bold green")
+
+    for item in service.cart.items:
+        product = service.get_product(item.product_id)
+        table.add_row(item.product_id, product.name, str(item.qty), f"{item.price} ₽", f"{item.line_total} ₽")
+
+    table.add_section()
+    table.add_row("", "", "", "[bold]Итого:[/bold]", f"[bold]{service.cart.subtotal} ₽[/bold]")
+    if service.cart.discount > 0:
+        table.add_row("", "", "", "[bold]Скидка:[/bold]", f"[bold]-{service.cart.discount} ₽[/bold]")
+        table.add_row("", "", "", "[bold]К оплате:[/bold]", f"[bold]{service.cart.total} ₽[/bold]")
+
+    console.print(table)
+
+
+def print_orders(service: ShopService):
+    if not service.orders:
+        print(Panel("Заказов еще нет", style="dim"))
+        return
+
+    for order in service.orders:
+        console.print(
+            Panel(str(order), title=f"Заказ #{order.id}", border_style="green" if order.status == "new" else "dim"))
 
 
 def main():
-    service = ShopService()
-    parser = argparse.ArgumentParser(prog="shop")
-    sub = parser.add_subparsers(dest="command", required=True)
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
 
-    # Каталог
-    cat = sub.add_parser("catalog")
-    cat.add_argument("--category")
-    search = sub.add_parser("search")
-    search.add_argument("query")
-    show = sub.add_parser("show")
-    show.add_argument("id")
-
-    # Корзина
-    csub = sub.add_parser("cart").add_subparsers(dest="action", required=True)
-    cadd = csub.add_parser("add")
-    cadd.add_argument("id");
-    cadd.add_argument("qty")
-    cset = csub.add_parser("set")
-    cset.add_argument("id");
-    cset.add_argument("qty")
-    crem = csub.add_parser("remove")
-    crem.add_argument("id")
-    cshow = csub.add_parser("show")
-
-    # Промо
-    promo = sub.add_parser("promo")
-    promo.add_argument("code")
-
-    # Заказы
-    sub.add_parser("checkout")
-    sub.add_parser("orders")
-    order = sub.add_parser("order")
-    order.add_argument("id")
-    cancel = sub.add_parser("cancel")
-    cancel.add_argument("id")
-    restock = sub.add_parser("restock")
-    restock.add_argument("id");
-    restock.add_argument("qty")
-    export = sub.add_parser("export-orders")
-    export.add_argument("path")
-
-    args = parser.parse_args()
-
-    try:
-        if args.command == "catalog":
-            items = service.list_products(args.category)
-            for p in items:
-                print(f"{p.id} | {p.name} | {p.category} | {p.price} ₽ | {p.stock}")
-        elif args.command == "search":
-            items = service.search_products(args.query)
-            for p in items:
-                print(f"{p.id} | {p.name}")
-        elif args.command == "show":
-            p = service.get_product(args.id)
-            print(f"{p.id} | {p.name} | {p.category} | {p.price} ₽ | {p.stock}")
-            if hasattr(p, 'min_kg'):
-                print(f"Тип: весовой, мин. {p.min_kg} кг")
-
-        elif args.command == "cart":
-            if args.action == "add":
-                service.add_to_cart(args.id, Decimal(args.qty))
-                print("Добавлено в корзину")
-            elif args.action == "set":
-                service.cart.set_qty(args.id, Decimal(args.qty))
-                service._save_state()
-                print("Количество обновлено")
-            elif args.action == "remove":
-                service.cart.remove(args.id)
-                service._save_state()
-                print("Удалено из корзины")
-            elif args.action == "show":
-                if not service.cart:
-                    print("Корзина пуста")
-                else:
-                    for i in service.cart:
-                        print(f"{i.product_id} x{i.qty} = {i.line_total} ₽")
-                    print(f"Итого: {service.cart.subtotal} ₽")
-                    if service.cart.discount > 0:
-                        print(f" Скидка: {service.cart.discount} ₽")
-                    print(f"ИТОГ: {service.cart.total} ₽")
-                    if service.cart.promo:
-                        print(f"Промокод: {service.cart.promo.code}")
-
-        elif args.command == "promo":
-            try:
-                service.cart.apply_promo(args.code)
-                service._save_state()
-                print(f"Применен промокод {args.code}")
-            except ShopError as e:
-                print(e)
-
-        elif args.command == "checkout":
-            order = service.checkout()
-            print("Заказ оформлен:")
-            print(order)
-
-        elif args.command == "orders":
-            for o in service.orders:
-                print(f"#{o.id} | {o.status} | {o.total} ₽")
-
-        elif args.command == "order":
-            o = next((x for x in service.orders if x.id == int(args.id)), None)
-            if o:
-                print(o)
+    # Инициализация файлов, если их нет
+    init_files = ["catalog.json", "promos.json", "orders.json"]
+    for filename in init_files:  
+        path = os.path.join(DATA_DIR, filename)
+        if not os.path.exists(path):
+            if filename == "catalog.json":
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"products": []}, f, ensure_ascii=False, indent=2)
+            elif filename == "promos.json":
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"promos": []}, f, ensure_ascii=False, indent=2)
             else:
-                print("Заказ не найден")
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump({"cart": {"items": [], "promo": None}, "orders": [], "next_order_id": 1}, f,
+                              ensure_ascii=False, indent=2)
 
-        elif args.command == "cancel":
-            service.cancel_order(int(args.id))
-            print("Заказ отменен")
+    service = ShopService(DATA_DIR)
 
-        elif args.command == "restock":
-            service.restock(args.id, Decimal(args.qty))
-            print("Остаток обновлен")
+    print(Panel("[bold cyan]Добро пожаловать в Магазин[/bold cyan]", subtitle="Введите команду"))
 
-        elif args.command == "export-orders":
-            import csv
-            with open(args.path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerow(["id", "status", "items_count", "subtotal", "discount", "total"])
-                for o in service.orders:
-                    writer.writerow([o.id, o.status, len(o.items), o.subtotal, o.discount, o.total])
-            print(f"Экспортировано в {args.path}")
+    while True:
+        try:
+            cmd = Prompt.ask(
+                "\nВведите команду ([bold]list[/bold], [bold]add[/bold], [bold]cart[/bold], [bold]promo[/bold], [bold]checkout[/bold], [bold]orders[/bold], [bold]cancel[/bold], [bold]exit[/bold])").lower()
 
-    except ShopError as e:
-        print(f"Ошибка: {e}")
-    except Exception as e:
-        print(f"Непредвиденная ошибка: {e}")
+            if cmd == "exit":
+                print("До свидания!")
+                break
+            elif cmd == "list":
+                cat = Prompt.ask("Категория (или Enter для всех)", default="")
+                print_products(service, cat if cat else None)
+            elif cmd == "add":
+                pid = Prompt.ask("ID товара")
+                try:
+                    qty_input = Prompt.ask("Количество")
+                    qty = Decimal(qty_input)
+                    service.add_to_cart(pid, qty)
+                    # ИСПРАВЛЕНО: Убрана ручная печать, теперь это делает @log_action в service.py
+                    # А здесь мы подтверждаем действие пользователю
+                    print(f"[green]Товар {pid} в количестве {qty} добавлен.[/green]")
+                except Exception as e:
+                    print(f"[red]Ошибка: {e}[/red]")
+            elif cmd == "cart":
+                print_cart(service)
+            elif cmd == "promo":
+                code = Prompt.ask("Промокод")
+                try:
+                    service.cart.apply_promo(code)
+                    service._save_orders()  # Сохраняем состояние корзины после применения промокода
+                    print(f"[green]Промокод {code} применен.[/green]")
+                except Exception as e:
+                    print(f"[red]Ошибка: {e}[/red]")
+            elif cmd == "checkout":
+                try:
+                    order = service.checkout()
+                    # ИСПРАВЛЕНО: Убрана ручная печать, логирование в service.py
+                    print(Panel(str(order), title="Заказ оформлен!", border_style="green"))
+                except Exception as e:
+                    print(f"[red]Ошибка: {e}[/red]")
+            elif cmd == "orders":
+                print_orders(service)
+            elif cmd == "cancel":
+                oid = Prompt.ask("ID заказа для отмены", default="")
+                if not oid:
+                    continue
+                try:
+                    service.cancel_order(int(oid))
+                    # ИСПРАВЛЕНО: Убрана ручная печать
+                    print(f"[green]Заказ {oid} отменен.[/green]")
+                except Exception as e:
+                    print(f"[red]Ошибка: {e}[/red]")
+            else:
+                print("[yellow]Неизвестная команда.[/yellow]")
+        except KeyboardInterrupt:
+            print("\n[yellow]Выход...[/yellow]")
+            break
+        except Exception as e:
+            print(f"[bold red]Критическая ошибка: {e}[/bold red]")
 
 
 if __name__ == "__main__":
     main()
-
-
-

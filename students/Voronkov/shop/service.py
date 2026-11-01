@@ -1,8 +1,5 @@
-
-import json
 import os
 from decimal import Decimal
-from typing import List, Optional
 from .repository import Repository
 from .products import PieceProduct, WeightProduct, DigitalProduct
 from .cart import Cart, CartItem
@@ -33,15 +30,17 @@ class ShopService:
         self.products = {}
         for p in data.get("products", []):
             cls = PRODUCT_CLASSES[p["type"]]
+
+            # Здесь мы передаем product_id вместо id!
             if p["type"] == "weight":
                 self.products[p["id"]] = cls(
-                    id=p["id"], name=p["name"], category=p["category"],
+                    product_id=p["id"], name=p["name"], category=p["id"],
                     price=p["price_per_kg"], stock=p["stock_kg"],
                     min_kg=p["min_kg"]
                 )
-            else:
+            else:  # piece или digital
                 self.products[p["id"]] = cls(
-                    id=p["id"], name=p["name"], category=p["category"],
+                    product_id=p["id"], name=p["name"], category=p["category"],
                     price=p["price"], stock=p.get("stock")
                 )
 
@@ -49,10 +48,8 @@ class ShopService:
         payload = {"products": [p.to_dict() for p in self.products.values()]}
         self.catalog_repo.save(payload)
 
-
     def _load_cart_and_orders(self):
         data = self.orders_repo.load()
-
         cart_items_data = []
         cart_promo = None
         orders_data = []
@@ -77,31 +74,21 @@ class ShopService:
             except (ProductNotFoundError, KeyError):
                 continue
 
-            if cart_promo:
-                try:
-                    self.cart.apply_promo(cart_promo)
-                except Exception:
-                    self.cart.promo = None
+        if cart_promo:
+            try:
+                self.cart.apply_promo(cart_promo)
+            except InvalidPromoError:
+                self.cart.promo = None
 
-            # Загрузка заказов
-            self.orders = []
-            for o in orders_data:
-                try:
-                    items = [CartItem(**i) for i in o["items"]]
-                    self.orders.append(Order(**o, items=items))
-                except (KeyError, TypeError):
-                    continue
-
-            self.next_order_id = next_id
-
-
-        # Загрузка заказов
         self.orders = []
-        for o in data.get("orders", []):
-            items = [CartItem(**i) for i in o["items"]]
-            self.orders.append(Order(**o, items=items))
+        for o in orders_data:
+            try:
+                items = [CartItem(**i) for i in o["items"]]
+                self.orders.append(Order(**o, items=items))
+            except (KeyError, TypeError):
+                continue
 
-        self.next_order_id = data.get("next_order_id", 1)
+        self.next_order_id = next_id
 
     def _save_orders(self):
         cart_data = {
@@ -143,20 +130,17 @@ class ShopService:
         if not self.cart:
             raise EmptyCartError("Корзина пуста")
 
-        # Проверка остатков
         for item in self.cart.items:
             product = self.get_product(item.product_id)
             if not isinstance(product, DigitalProduct):
                 product.check_qty(item.qty)
 
-        # Списание и сохранение КАТАЛОГА
         for item in self.cart.items:
             product = self.get_product(item.product_id)
             if not isinstance(product, DigitalProduct):
                 product.stock -= item.qty
         self._save_catalog()
 
-        # Создание заказа
         order = Order(
             id=self.next_order_id,
             items=self.cart.items.copy(),
@@ -168,7 +152,6 @@ class ShopService:
         self.orders.append(order)
         self.next_order_id += 1
 
-        # Очистка корзины и сохранение ЗАКАЗОВ
         self.cart.clear()
         self._save_orders()
         return order
@@ -181,7 +164,6 @@ class ShopService:
         if order.status == "cancelled":
             raise ShopError(f"Заказ {order_id} уже отменен")
 
-        # Возврат на склад и сохранение КАТАЛОГА
         for item in order.items:
             product = self.get_product(item.product_id)
             if not isinstance(product, DigitalProduct):

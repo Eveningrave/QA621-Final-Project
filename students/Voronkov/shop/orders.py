@@ -1,4 +1,4 @@
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import List
 from .cart import CartItem

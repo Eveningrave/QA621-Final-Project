@@ -3,6 +3,10 @@
     "items": [],
     "promo": null
   },
-  "orders": [],
-  "next_order_id": 1
-}
+  "orders": [
+    {
+      "id": 1,
+      "items": [
+        {
+          "product_id": "P001",
+          "qty": 

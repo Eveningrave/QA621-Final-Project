@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict, field
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Optional
+from typing import Optional, Dict, Any
+# from .exceptions import InvalidQuantityError, OutOfStockError
 
 class Product(ABC):
-    def __init__(self, id: str, name: str, category: str, price: Decimal, stock: Optional[Decimal]):
-        self.id = id
+    def __init__(self, product_id: str, name: str, category: str, price: Decimal, stock: Optional[Decimal]):
+        # Переименовано из 'id' в 'product_id', чтобы не затенять built-in функцию id()
+        self.product_id = product_id
         self._name = name
         self._category = category
         self._price = Decimal(price)
@@ -47,8 +48,15 @@ class Product(ABC):
     def check_qty(self, qty: Decimal):
         pass
 
-    def to_dict(self):
-        return asdict(self)
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.product_id,
+            "name": self.name,
+            "category": self.category,
+            "price": str(self.price), # Decimal не сериализуется в JSON напрямую, превращаем в строку
+            "stock": str(self.stock) if self.stock is not None else None
+        }
+
 
 class PieceProduct(Product):
     def __init__(self, **kwargs):
@@ -58,12 +66,16 @@ class PieceProduct(Product):
         return (self.price * qty).quantize(Decimal('0.01'))
 
     def check_qty(self, qty: Decimal):
+        # Исключения должны импортироваться здесь, если они используются
+        from .exceptions import InvalidQuantityError, OutOfStockError
+
         if not qty == int(qty):
             raise InvalidQuantityError("Количество штучного товара должно быть целым")
         if qty <= 0:
             raise InvalidQuantityError("Количество должно быть больше нуля")
         if qty > self.stock:
             raise OutOfStockError(f"Недостаточно товара на складе (осталось {self.stock})")
+
 
 class WeightProduct(Product):
     def __init__(self, min_kg: Decimal, **kwargs):
@@ -80,11 +92,14 @@ class WeightProduct(Product):
 
     def line_price(self, qty: Decimal) -> Decimal:
         if qty < self.min_kg:
+            from .exceptions import InvalidQuantityError
             raise InvalidQuantityError(f"Минимальный вес: {self.min_kg} кг")
         total = self.price_per_kg * qty
         return total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     def check_qty(self, qty: Decimal):
+        from .exceptions import InvalidQuantityError, OutOfStockError
+
         if qty <= 0:
             raise InvalidQuantityError("Количество должно быть больше нуля")
         if qty < self.min_kg:
@@ -92,15 +107,19 @@ class WeightProduct(Product):
         if qty > self.stock:
             raise OutOfStockError(f"Недостаточно товара на складе (осталось {self.stock} кг)")
 
+
 class DigitalProduct(Product):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     def line_price(self, qty: Decimal) -> Decimal:
         if qty != 1:
+            from .exceptions import InvalidQuantityError
             raise InvalidQuantityError("Цифровой товар можно добавить только в количестве 1")
         return self.price
 
     def check_qty(self, qty: Decimal):
+        from .exceptions import InvalidQuantityError
+
         if qty != 1:
             raise InvalidQuantityError("Цифровой товар можно добавить только в количестве 1")

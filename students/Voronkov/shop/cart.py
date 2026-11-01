@@ -1,8 +1,9 @@
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import List, Optional
-from .products import Product
-from .discounts import Discount
+#from .products import Product
+from .discounts import Discount, DiscountFactory
+from .exceptions import ProductNotFoundError, InvalidPromoError
 
 
 @dataclass
@@ -32,7 +33,7 @@ class Cart:
         return bool(self.items)
 
     @property
-    def subtotal(self) -> Decimal:
+    def subtotal(self):
         return sum(item.line_total for item in self.items)
 
     @property
@@ -54,14 +55,14 @@ class Cart:
                 new_qty = item.qty + qty
                 product.check_qty(new_qty)
                 item.qty = new_qty
-                item.price = product.price if not isinstance(product, WeightProduct) else product.price_per_kg
+                item.price = product.line_price(Decimal('1')) if item.qty == 1 else product.line_price(new_qty) / new_qty
                 item.line_total = product.line_price(new_qty)
                 return
 
         self.items.append(CartItem(
             product_id=product_id,
             qty=qty,
-            price=product.price if not isinstance(product, WeightProduct) else product.price_per_kg,
+            price=product.line_price(Decimal('1')),
             line_total=product.line_price(qty)
         ))
 

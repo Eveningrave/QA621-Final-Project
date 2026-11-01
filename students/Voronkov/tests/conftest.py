@@ -1,7 +1,5 @@
 import pytest
 import json
-import os
-from pathlib import Path
 from shop.service import ShopService
 
 @pytest.fixture
@@ -29,14 +27,19 @@ def sample_promos():
         ]
     }
 
+
 @pytest.fixture
 def service(temp_data_dir, sample_catalog, sample_promos):
     catalog_path = temp_data_dir / "catalog.json"
     promos_path = temp_data_dir / "promos.json"
     orders_path = temp_data_dir / "orders.json"
 
-    catalog_path.write_text(json.dumps(sample_catalog, ensure_ascii=False, indent=2))
-    promos_path.write_text(json.dumps(sample_promos, ensure_ascii=False, indent=2))
-    orders_path.write_text(json.dumps({"cart": {"items": [], "promo": None}, "orders": [], "next_order_id": 1}))
+
+    catalog_path.write_text(json.dumps(sample_catalog, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    promos_path.write_text(json.dumps(sample_promos, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    orders_path.write_text(json.dumps({"cart": {"items": [], "promo": None}, "orders": [], "next_order_id": 1}),
+                           encoding="utf-8")
 
     return ShopService(data_dir=str(temp_data_dir))
