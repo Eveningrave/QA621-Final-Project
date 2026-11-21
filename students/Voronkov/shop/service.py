@@ -31,17 +31,22 @@ class ShopService:
         for p in data.get("products", []):
             cls = PRODUCT_CLASSES[p["type"]]
 
-            # Здесь мы передаем product_id вместо id!
             if p["type"] == "weight":
                 self.products[p["id"]] = cls(
-                    product_id=p["id"], name=p["name"], category=p["id"],
-                    price=p["price_per_kg"], stock=p["stock_kg"],
+                    product_id=p["id"],
+                    name=p["name"],
+                    category=p["category"],
+                    price=p["price_per_kg"],
+                    stock=p["stock_kg"],
                     min_kg=p["min_kg"]
                 )
             else:  # piece или digital
                 self.products[p["id"]] = cls(
-                    product_id=p["id"], name=p["name"], category=p["category"],
-                    price=p["price"], stock=p.get("stock")
+                    product_id=p["id"],
+                    name=p["name"],
+                    category=p["category"],
+                    price=p["price"],
+                    stock=p.get("stock")
                 )
 
     def _save_catalog(self):
@@ -61,17 +66,21 @@ class ShopService:
             orders_data = data.get("orders", [])
             next_id = data.get("next_order_id", 1)
 
+        # Загрузка корзины
         self.cart.items = []
         for item_data in cart_items_data:
             try:
                 product = self.get_product(item_data["product_id"])
+                qty = Decimal(str(item_data["qty"]))
                 self.cart.items.append(
                     CartItem(
-                        **item_data,
-                        line_total=product.line_price(item_data["qty"])
+                        product_id=item_data["product_id"],
+                        qty=qty,
+                        price=Decimal(str(item_data["price"])),
+                        line_total=product.line_price(qty)
                     )
                 )
-            except (ProductNotFoundError, KeyError):
+            except (ProductNotFoundError, KeyError, Exception):
                 continue
 
         if cart_promo:
@@ -80,12 +89,29 @@ class ShopService:
             except InvalidPromoError:
                 self.cart.promo = None
 
+        # Загрузка заказов
         self.orders = []
         for o in orders_data:
             try:
-                items = [CartItem(**i) for i in o["items"]]
-                self.orders.append(Order(**o, items=items))
-            except (KeyError, TypeError):
+                items = [
+                    CartItem(
+                        product_id=i["product_id"],
+                        qty=Decimal(str(i["qty"])),
+                        price=Decimal(str(i["price"])),
+                        line_total=Decimal(str(i["line_total"]))
+                    )
+                    for i in o["items"]
+                ]
+                # УБИРАЕМ "items" ИЗ СЛОВАРЯ, ЧТОБЫ НЕ ПЕРЕДАТЬ ЕГО ДВАЖДЫ, БЛЯДЬ!
+                order_data = {k: v for k, v in o.items() if k != "items"}
+
+                # Преобразуем суммы в Decimal
+                for key in ["subtotal", "discount", "total"]:
+                    if key in order_data:
+                        order_data[key] = Decimal(str(order_data[key]))
+
+                self.orders.append(Order(**order_data, items=items))
+            except (KeyError, TypeError, Exception):
                 continue
 
         self.next_order_id = next_id

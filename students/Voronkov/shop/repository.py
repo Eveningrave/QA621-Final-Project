@@ -3,11 +3,13 @@ import os
 from decimal import Decimal
 from typing import Any, Dict
 
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, o):
         if isinstance(o, Decimal):
-            return str(o)  # Превращаем Decimal в строку, чтобы сохранить точность
+            return str(o)
         return super().default(o)
+
 
 class Repository:
     def __init__(self, path: str):
@@ -29,5 +31,4 @@ class Repository:
 
     def save(self, data: Dict[str, Any]):
         with open(self.path, "w", encoding="utf-8") as f:
-            # ДОБАВЬ СЮДА, БЛЯДЬ, КЛАСС ЭНКОДЕРА!
             json.dump(data, f, ensure_ascii=False, indent=2, cls=DecimalEncoder)
